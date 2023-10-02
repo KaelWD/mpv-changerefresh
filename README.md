@@ -1,3 +1,5 @@
+A small fork of [CogentRedTester/mpv-changerefresh](https://github.com/CogentRedTester/mpv-changerefresh) to make it more compatible with [jellyfin-mpv-shim](https://github.com/jellyfin/jellyfin-mpv-shim). The original script only reverted the refresh rate when mpv closed. Because mpv-shim launches mpv with `idle=yes` the refresh rate wouldn't get reverted after playback. This fork simply makes it so the refresh rate also reverts upon the file ending or when the player receives the stop signal. Below is the original `README.md`.
+
 # change-refresh
 
 This script uses nircmd (windows only) to change the refresh rate of the display that the mpv window is currently open in
