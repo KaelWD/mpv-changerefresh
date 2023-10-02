@@ -529,3 +529,9 @@ mp.register_event('file-loaded', autoChange)
 
 --reverts refresh on mpv shutdown
 mp.register_event("shutdown", revertRefresh)
+
+--reverts refresh on file end
+mp.register_event("end-file", revertRefresh)
+
+--reverts refresh on player stop
+mp.register_event("stop", revertRefresh)
