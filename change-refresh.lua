@@ -57,7 +57,8 @@ local options = {
     --  "23;24;25-50;60"  Will set the display to 50fps for 25fps videos
     --this whitelist also applies when attempting to revert the display, so include that rate in the list
     --nircmd only seems to work with integers, DO NOT use the full refresh rate, i.e. 23.976
-    rates = "23;24;25;29;30;50;59;60",
+    -- rates = "23;24;25;29;30;50;59;60",
+    rates = "23-120;24-144;25-120;29-60;30-120;50-144;59-60;60-120;165",
 
     --change refresh automatically on startup
     auto = false,
@@ -119,6 +120,44 @@ local var = {
     rateList = {},
     rates = {}
 }
+
+local original = {
+    width = 2560,
+    height = 1440,
+    refresh_rate = 165
+}
+
+local IMAGE_LIST = {
+    "png",
+    "jpeg",
+    "jpg",
+    "avif",
+    "heic",
+    "webp",
+    "gif",
+    "tiff",
+    "bmp",
+    "raw",
+    "jxl",
+    "bpg",
+    "svg",
+    "pdf"
+}
+
+function GetFileExtension(url)
+    return url:match("^.+(%..+)$")
+end
+
+local function has_value (tab, val)
+    for index, value in ipairs(tab) do
+        if value == val then
+            return true
+        end
+    end
+
+    return false
+end
+
 
 --is run whenever a change in script-opts is detected
 function updateOptions(changes)
@@ -292,6 +331,8 @@ function getDisplayResolution()
     while time + 0.1 > mp.get_time() do end
 
     local width, height = mp.get_osd_size()
+    -- width = mp.get_property_number('display-width')
+    -- height = mp.get_property_number('display-height')
 
     msg.verbose('current monitor resolution = ' .. width .. 'x' .. height)
 
@@ -355,7 +396,7 @@ end
 --picks which whitelisted rate to switch the monitor to
 function findValidRate(rate)
     msg.verbose('searching for closest valid rate to ' .. rate)
-    
+
     --if the rate already exists in the table then the function just returns that
     if var.rates[rate] ~= nil then
         msg.verbose(rate .. ' already in list, returning matching rate: ' .. var.rates[rate])
@@ -386,55 +427,91 @@ function findValidRate(rate)
     return closestRate
 end
 
+--picks highest rate to switch the monitor to
+function findHighestRate(rate)
+    msg.verbose('searching for highest valid rate to ' .. rate)
+
+    --if the rate already exists in the table then the function just returns that
+    if var.rates[rate] ~= nil then
+        msg.verbose(rate .. ' already in list, returning matching rate: ' .. var.rates[rate])
+        return var.rates[rate]
+    end
+
+    local highestRate = 0
+    rate = tonumber(rate)
+
+    --picks the highest fps in the whitelist
+    for i = 1, #var.rateList, 1 do
+        local currentRate = var.rateList[i]
+        msg.debug('comparing ' .. rate .. ' to ' .. currentRate)
+        if (currentRate > highestRate and currentRate <= rate) then
+            highestRate = currentRate
+        end
+    end
+
+    if highestRate == 0 then
+        highestRate = var.rateList[#var.rateList]
+    end
+    msg.verbose('highest valid rate is ' .. highestRate .. ', saving...')
+
+    --saves the rate to reduce repeated searches
+    var.rates[rate] = var.rates[highestRate]
+
+    return highestRate
+end
+
+
 --executes commands to switch monior to video refreshrate
 function matchVideo()
-    --gets display details
-    local dname, dnumber = getDisplayDetails()
-
-    --if the change is executed on a different monitor to the previous, and the previous monitor has not been been reverted
-    --then revert the previous changes before changing the new monitor
-    if ((var.beenReverted == false) and (var.dname ~= dname)) then
-        msg.verbose('changing new display, reverting old one first')
-        revertRefresh()
-    end
-
-    --records video properties
-    var.new_width = mp.get_property_number('dwidth')
-    var.new_height = mp.get_property_number('dheight')
-    msg.verbose("video resolution = " .. tostring(var.new_width) .. "x" .. tostring(var.new_height))
-
-    --saves either the estimated or specified fps of the video
-    if (options.estimated_fps == true) then
-        var.new_fps = mp.get_property_number('estimated-vf-fps', 0)
-    else
-        var.new_fps = mp.get_property_number('container-fps', 0)
-    end
+    if isFileTypeOkay() == true then
+        --gets display details
+        local dname, dnumber = getDisplayDetails()
     
-    --Floor is used because 23fps video has an actual framerate of ~23.9, this occurs across many video rates
-    var.new_fps = math.floor(var.new_fps)
-    var.new_width, var.new_height = getModifiedWidthHeight(var.new_width, var.new_height)
-
-    --picks which whitelisted rate to switch the monitor to based on the video rate
-    var.new_fps = findValidRate(var.new_fps)
-
-    --if beenReverted=true, then the current display settings may not be saved
-    if (var.beenReverted == true) then
-        setCurrentRes()
-
-        --saves the actual resolution only if option set, otherwise uses the defaults
-        msg.verbose('saving original resolution: ' .. var.current_width .. 'x' .. var.current_height)
-        var.original_width, var.original_height = var.current_width, var.current_height
-
-        var.original_fps = math.floor(mp.get_property_number('display-fps'))
-        msg.verbose('saving original fps: ' .. var.original_fps)
+        --if the change is executed on a different monitor to the previous, and the previous monitor has not been been reverted
+        --then revert the previous changes before changing the new monitor
+        if ((var.beenReverted == false) and (var.dname ~= dname)) then
+            msg.verbose('changing new display, reverting old one first')
+            revertRefresh()
+        end
+    
+        --records video properties
+        var.new_width = mp.get_property_number('dwidth')
+        var.new_height = mp.get_property_number('dheight')
+        msg.verbose("video resolution = " .. tostring(var.new_width) .. "x" .. tostring(var.new_height))
+    
+        --saves either the estimated or specified fps of the video
+        if (options.estimated_fps == true) then
+            var.new_fps = mp.get_property_number('estimated-vf-fps', 0)
+        else
+            var.new_fps = mp.get_property_number('container-fps', 0)
+        end
+        
+        --Floor is used because 23fps video has an actual framerate of ~23.9, this occurs across many video rates
+        var.new_fps = math.floor(var.new_fps)
+        var.new_width, var.new_height = getModifiedWidthHeight(var.new_width, var.new_height)
+    
+        --picks which whitelisted rate to switch the monitor to based on the video rate
+        var.new_fps = findValidRate(var.new_fps)
+    
+        --if beenReverted=true, then the current display settings may not be saved
+        if (var.beenReverted == true) and (var.new_fps ~= original.refresh_rate) then
+            setCurrentRes()
+    
+            --saves the actual resolution only if option set, otherwise uses the defaults
+            msg.verbose('saving original resolution: ' .. var.current_width .. 'x' .. var.current_height)
+            var.original_width, var.original_height = var.current_width, var.current_height
+    
+            var.original_fps = math.floor(mp.get_property_number('display-fps'))
+            msg.verbose('saving original fps: ' .. var.original_fps)
+        end
+    
+        --saves the current name and number for next time
+        var.dname = dname
+        var.dnumber = dnumber
+    
+        changeRefresh(original.width, original.height, var.new_fps, dnumber)
+        var.beenReverted = false
     end
-
-    --saves the current name and number for next time
-    var.dname = dname
-    var.dnumber = dnumber
-
-    changeRefresh(var.new_width, var.new_height, var.new_fps, dnumber)
-    var.beenReverted = false
 end
 
 --reverts the monitor to its original refresh rate
@@ -443,12 +520,16 @@ function revertRefresh()
         msg.verbose("reverting refresh rate")
 
         local rate
-        if options.original_rate == 0 then
+        if original.refresh_rate ~= 0 then
+            rate = original.refresh_rate
+        elseif options.original_rate == -1 then
+            rate = findHighestRate(var.original_fps)
+        elseif options.original_rate == 0 then
             rate = findValidRate(var.original_fps)
         else
             rate = options.original_rate
         end
-        changeRefresh(var.original_width, var.original_height, rate, var.dnumber)
+        changeRefresh(original.width, original.height, rate, var.dnumber)
         var.beenReverted = true
     else
         msg.verbose("aborting reversion, display has not been changed")
@@ -459,7 +540,10 @@ end
 --sets the current resolution and refresh as the default to use upon reversion
 function setDefault()
     var.original_width, var.original_height = getDisplayResolution()
-    var.original_fps = math.floor(mp.get_property_number('display-fps'))
+    local fps = mp.get_property_number('display-fps')
+    if fps ~= nil then
+        var.original_fps = math.floor(fps)
+    end
 
     var.beenReverted = true
 
@@ -467,6 +551,19 @@ function setDefault()
     msg.info('set ' .. var.original_width .. "x" .. var.original_height .. " " .. var.original_fps .. "Hz as defaut display rate")
     osdMessage('Change-Refresh: set ' .. var.original_width .. "x" .. var.original_height .. " " .. var.original_fps .. "Hz as defaut display rate")
 end
+
+--sets the current resolution and refresh as the original to use upon reversion
+-- function saveOriginalRefreshRate()
+--     original.width, original.height = getDisplayResolution()
+--     local fps = mp.get_property_number('display-fps')
+--     if fps ~= nil then
+--         original.refresh_rate = math.floor(fps)
+--     end
+
+--     --logging change to OSD & the console
+--     msg.info('set ' .. original.width .. "x" .. original.height .. " " .. original.refresh_rate .. "Hz as original display rate")
+--     osdMessage('Change-Refresh: set ' .. original.width .. "x" .. original.height .. " " .. original.refresh_rate .. "Hz as original display rate")
+-- end
 
 --toggles between using estimated and specified fps
 function toggleFpsType()
@@ -480,6 +577,19 @@ function toggleFpsType()
         msg.info("now using estimated fps")
     end
     return
+end
+
+function isFileTypeOkay()
+    local file_format = mp.get_property("file-format")
+    local file_name = mp.get_property("filename")
+    if file_format ~= nil and has_value(IMAGE_LIST, file_format:lower()) == false then
+        if file_name ~= nil and has_value(IMAGE_LIST, GetFileExtension(file_name):lower()) == false then
+            msg.info("This has passed file type check" .. file_format .. file_name .. GetFileExtension(file_name):lower())
+            return true
+        end
+    end
+    msg.info("This has not passed file type check" .. file_format .. file_name .. GetFileExtension(file_name):lower())
+    return false
 end
 
 --runs the script automatically on startup if option is enabled
@@ -506,7 +616,9 @@ function scriptMessage(width, height, rate, display)
     changeRefresh(width, height, rate, display)
 end
 
+
 updateOptions()
+-- saveOriginalRefreshRate()
 
 --tries to change current display to match video fps (the main function you'd want to use)
 mp.add_key_binding("f10", "match-refresh", matchVideo)
