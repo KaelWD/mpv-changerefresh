@@ -1,8 +1,5 @@
 --[[
-    This script uses nircmd to change the refresh rate of the display that the mpv window is currently open in
-    This was written because I could not get autospeedwin to work :(
-
-    The script uses a hotkey by default, but can be setup to run on startup, see the options below for more details
+    This script uses WindowsDisplayManager to change the refresh rate of the display that the mpv window is currently open in
 
     If the display does not support the specified resolution or refresh rate it will silently fail
     If the video refresh rate does not match any on the whitelist it will pick the next highest.
@@ -19,9 +16,6 @@
     correct keybind is pressed, or when mpv exits. The original rate needs to be included on the whitelist and follows
     custom rate rules (i.e. if the monitor was originally 25Hz and the whitelist contains "25-50", then it will revert to 50)
 
-    The script is able to find the current resolution of the monitor and will always use those dimensions when switching refresh rates,
-    however I have an UHD mode (option is UHD_adaptive) hardcoded to use a resolution of 3840x2160p for videos with a height of > 1440 pixels.
-
     It is possible to disable automatic resolution detection and use manual values (see options below).
     The detection is done via switching to fullscreen mode and grabbing the resolution of the OSD, so it can be disabled if one finds it annoying.
 
@@ -34,7 +28,7 @@
     Display stands for the display number (starting from 0) which is printed to the console when the display is changed.
     Leaving out this argument will auto-detect the currently used monitor, like the usual behaviour.
 
-    These script messages completely bypass the whitelist and rate associations and are sent to nircmd directly, so make sure you send a valid integer.
+    These script messages completely bypass the whitelist and rate associations and are sent to WindowsDisplayManager directly, so make sure you send a valid integer.
     They are also completely independant from the usual automatic reversion system, so you'll have to handle that yourself.
 
     Note that if the mpv window is lying across multiple displays it may not save the original refresh rate of the correct display
@@ -49,9 +43,6 @@ require 'mp.options'
 --options available through --script-opts=changerefresh-[option]=value
 --all of these options can be changed at runtime using profiles, the script will automatically update
 local options = {
-    --the location of nircmd.exe, tries to use the system path by default
-    nircmd = "nircmd",
-
     --list of valid refresh rates, separated by semicolon, listed in ascending order
     --by adding a hyphen after a number you can set a custom display rate for that specific video rate:
     --  "23;24;25-50;60"  Will set the display to 50fps for 25fps videos
@@ -61,7 +52,7 @@ local options = {
     rates = "23-48;24-48;25-50;29-60;30-60;50;59-60;60",
 
     --change refresh automatically on startup
-    auto = false,
+    auto = true,
 
     --duration (in seconds) of the pause when changing display modes
     --set to zero to disable video pausing
@@ -88,14 +79,6 @@ local options = {
     --this rate bypasses the usual rates whitelist, so make sure it is valid
     --the actual original rate will be ignored
     original_rate = 0,
-
-    --if enabled, this mode sets the monitor to the specified dimensions when the resolution of the video is greater than or equal to the threshold
-    --if less than the threshold the monitor will be set to the default shown above, or to the current resolution
-    --this feature is only really useful if you don't want to be upscaling video to UHD, but still want to play UHD files in native resolution
-    UHD_adaptive = false,
-    UHD_threshold = 1440,
-    UHD_width = 3840,
-    UHD_height = 2160,
 
     --set whether to output status messages to the osd
     osd_output = true
@@ -314,7 +297,7 @@ function getDisplayDetails()
     --there is no way to test which display this is, so reverting the refresh when mpv is on multiple monitors is unpredictable
     --however, by default I'm just selecting whatever the first monitor in the list is
     if #name > 1 then
-        msg.warn('mpv window is on multiplem displays, script may revert to wrong display rate')
+        msg.warn('mpv window is on multiple displays, script may revert to wrong display rate')
     end
 
     name = name[1]
@@ -332,24 +315,10 @@ end
 
 --chooses a width and height to switch the display to based on the resolution of the video
 function getModifiedWidthHeight(width, height)
-    --if UHD adaptive is disabled then it doesn't matter what the video resolution is it'll just use the current resolution
-    if (options.UHD_adaptive == false) then
-        setCurrentRes()
-        height = var.current_height
-        width = var.current_width
-        goto functionend
-    end
-    --sets the monitor to 2160p if an UHD video is played, otherwise set to the default
-    if (height < options.UHD_threshold) then
-        setCurrentRes()
-        height = var.current_height
-        width = var.current_width
-    else
-        height = options.UHD_height
-        width = options.UHD_width
-    end
+    setCurrentRes()
+    height = var.current_height
+    width = var.current_width
 
-    ::functionend::
     msg.verbose("setting display to: " .. width .. "x" .. height)
     return width, height
 end
@@ -435,11 +404,6 @@ function matchVideo()
         revertRefresh()
     end
 
-    --records video properties
-    var.new_width = mp.get_property_number('dwidth')
-    var.new_height = mp.get_property_number('dheight')
-    msg.verbose("video resolution = " .. tostring(var.new_width) .. "x" .. tostring(var.new_height))
-
     --saves either the estimated or specified fps of the video
     if (options.estimated_fps == true) then
         var.new_fps = mp.get_property_number('estimated-vf-fps', 0)
@@ -449,18 +413,13 @@ function matchVideo()
 
     --Floor is used because 23fps video has an actual framerate of ~23.9, this occurs across many video rates
     var.new_fps = math.floor(var.new_fps)
-    var.new_width, var.new_height = getModifiedWidthHeight(var.new_width, var.new_height)
 
     --picks which whitelisted rate to switch the monitor to based on the video rate
     var.new_fps = findValidRate(var.new_fps)
 
     --if beenReverted=true, then the current display settings may not be saved
-    if (var.beenReverted == true) and (var.new_fps ~= original.refresh_rate) then
+    if (var.beenReverted == true) and (var.new_fps ~= var.original_fps) then
         setCurrentRes()
-
-        --saves the actual resolution only if option set, otherwise uses the defaults
-        msg.verbose('saving original resolution: ' .. var.current_width .. 'x' .. var.current_height)
-        var.original_width, var.original_height = var.current_width, var.current_height
 
         var.original_fps = math.floor(mp.get_property_number('display-fps'))
         msg.verbose('saving original fps: ' .. var.original_fps)
@@ -470,7 +429,7 @@ function matchVideo()
     var.dname = dname
     var.dnumber = dnumber
 
-    changeRefresh(var.new_width, var.new_height, var.new_fps, dnumber)
+    changeRefresh(var.new_fps, dnumber)
     var.beenReverted = false
 end
 
@@ -489,7 +448,7 @@ function revertRefresh()
         else
             rate = options.original_rate
         end
-        changeRefresh(var.original_width, var.original_height, rate, var.dnumber)
+        changeRefresh(rate, var.dnumber)
         var.beenReverted = true
     else
         msg.verbose("aborting reversion, display has not been changed")
@@ -499,7 +458,6 @@ end
 
 --sets the current resolution and refresh as the default to use upon reversion
 function setDefault()
-    var.original_width, var.original_height = getDisplayResolution()
     local fps = mp.get_property_number('display-fps')
     if fps ~= nil then
         var.original_fps = math.floor(fps)
@@ -508,8 +466,8 @@ function setDefault()
     var.beenReverted = true
 
     --logging change to OSD & the console
-    msg.info('set ' .. var.original_width .. "x" .. var.original_height .. " " .. var.original_fps .. "Hz as defaut display rate")
-    osdMessage('Change-Refresh: set ' .. var.original_width .. "x" .. var.original_height .. " " .. var.original_fps .. "Hz as defaut display rate")
+    msg.info('set ' .. var.original_fps .. "Hz as defaut display rate")
+    osdMessage('Change-Refresh: set ' .. var.original_fps .. "Hz as defaut display rate")
 end
 
 --toggles between using estimated and specified fps
@@ -547,9 +505,52 @@ function scriptMessage(width, height, rate, display)
     end
 
     msg.verbose('recieved script message: ' .. width .. ' ' .. height .. ' ' .. rate .. ' ' .. display)
-    changeRefresh(width, height, rate, display)
+    changeRefresh(rate, display)
 end
 
+function wdmCommand(command)
+    local process = mp.command_native({
+        name = 'subprocess',
+        playback_only = false,
+        args = {
+            "powershell",
+            "-command",
+            '"Import-Module WindowsDisplayManager;' .. command .. '"'
+        }
+    })
+
+    msg.debug(utils.to_string(process))
+
+    if (process.status < 0) then
+        local error = process.error_string
+        msg.warn(utils.to_string(process))
+        msg.warn(error)
+        msg.error('Error sending command')
+    end
+end
+
+function offHDR()
+    -- if primaries == 'bt.2020' then
+
+    -- end
+end
+
+function toggleHDR(_, primaries)
+    if primaries == nil then
+        return
+    end
+
+    wdmCommand('(WindowsDisplayManager\\GetPrimaryDisplay).DisableHdr()')
+
+    -- if primaries == 'bt.2020' then
+    --     os.execute('powershell -command "Import-Module WindowsDisplayManager; (WindowsDisplayManager\GetPrimaryDisplay).EnableHdr()"')
+    --     mp.register_event('end-file', offHDR)
+    --     mp.register_event('shutdown', offHDR)
+    --     mp.register_event('stop', offHDR)
+    -- end
+
+    print(mp.get_property('width'), 'x', mp.get_property('height'), primaries)
+end
 
 updateOptions()
 
@@ -580,3 +581,6 @@ mp.register_event("end-file", revertRefresh)
 
 --reverts refresh on player stop
 mp.register_event("stop", revertRefresh)
+
+--toggles HDR
+mp.observe_property('video-params/primaries', 'string', toggleHDR)

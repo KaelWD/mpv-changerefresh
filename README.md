@@ -1,15 +1,20 @@
-A small fork of [CogentRedTester/mpv-changerefresh](https://github.com/CogentRedTester/mpv-changerefresh) to make it more compatible with [jellyfin-mpv-shim](https://github.com/jellyfin/jellyfin-mpv-shim). The original script only reverted the refresh rate when mpv closed. Because mpv-shim launches mpv with `idle=yes` the refresh rate wouldn't get reverted after playback. This fork simply makes it so the refresh rate also reverts upon the file ending or when the player receives the stop signal. Below is the original `README.md`.
+A fork of [CogentRedTester/mpv-changerefresh](https://github.com/CogentRedTester/mpv-changerefresh) with changes from [](https://github.com/Sevardon-Code/mpvshim-changerefresh) to make it more compatible with [jellyfin-mpv-shim](https://github.com/jellyfin/jellyfin-mpv-shim), [](https://github.com/WhonderWy/mpv-changerefresh) to improve refresh rate selection, and my own to also add HDR switching.
 
 # change-refresh
 
-This script uses nircmd (windows only) to change the refresh rate of the display that the mpv window is currently open in
-This was written because I could not get autospeedwin to work :(
+## Installation
 
-The script uses a hotkey by default, but can be setup to run on startup.
+Open PowerShell as administrator and run
+```
+Set-ExecutionPolicy Unrestricted
+Install-Module -Name WindowsDisplayManager
+```
+
+This script uses nircmd (windows only) to change the refresh rate of the display that the mpv window is currently open in and WindowsDisplayManager to automatically enable HDR if the video has bt.2020 primaries.
 
 ## Behaviour
 When the script is activated it will automatically detect the refresh rate of the current video and attempt to change the display
-to the closes rate on the whitelist. The script will keep track of the original refresh rate of the monitor and revert when either the
+to the closest rate on the whitelist. The script will keep track of the original refresh rate of the monitor and revert when either the
 correct keybind is pressed, or when mpv exits. The original rate needs to be included on the whitelist and follows
 custom rate rules (i.e. if the monitor was originally 25Hz and the whitelist contains `25-50`, then it will revert to 50).
 
@@ -18,13 +23,14 @@ If the display does not support the specified resolution or refresh rate it will
 If the video refresh rate does not match any on the whitelist it will pick the next highest.
 If the video fps is higher than any on the whitelist it will pick the highest available
 The whitelist is specified via the script-opt `rates`. Valid rates are separated via semicolons, do not include spaces and list in ascending order.
-    
+
     changerefresh-rates="23;24;30;60"
 
 ### Custom Rates
 You can also set a custom display rate for individual video rates using a hyphen:
-    
+
     changerefresh-rates="23;24;25-50;30;60"
+
 This will change the display to 23, 24, and 30 fps when playing videos in those same rates, but will change the display to 50 fps when
 playing videos in 25 Hz
 
@@ -53,7 +59,7 @@ The keybinds, and their behaviour are as follows:
 
 ## Script Messages
 You can also send refresh change commands directly using script messages:
-    
+
     script-message change-refresh [width] [height] [rate] [display]
 
 Display stands for the display number (starting from 0) which is printed to the console when the display is changed.
